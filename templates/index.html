@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Football Analytics</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+body {
+    background: #0a0e1a;
+    color: #e2e8f0;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+.navbar-custom {
+    background: #1a1f35;
+    padding: 15px 30px;
+    border-bottom: 1px solid #334155;
+}
+
+.card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+}
+
+.card:hover {
+    border-color: #60a5fa;
+}
+
+.card h5 {
+    color: #60a5fa;
+    margin-bottom: 15px;
+}
+
+.card p {
+    color: #ffffff;
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+
+.card span {
+    color: #ffffff;
+}
+
+.btn-predict {
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    border: none;
+    padding: 12px 30px;
+    border-radius: 10px;
+    color: white;
+    font-weight: bold;
+    width: 100%;
+    cursor: pointer;
+}
+
+.btn-predict:hover {
+    opacity: 0.9;
+    color: white;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: bold;
+    color: #34d399 !important;
+}
+
+.value-bet {
+    color: #fbbf24 !important;
+    font-weight: bold;
+}
+
+.model-bar {
+    height: 8px;
+    background: #334155;
+    border-radius: 4px;
+    margin-top: 5px;
+    margin-bottom: 10px;
+}
+
+.model-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s;
+}
+
+#loading {
+    display: none;
+    text-align: center;
+    margin-top: 15px;
+}
+
+.label-text {
+    color: #94a3b8 !important;
+}
+
+#xg_home {
+    color: #34d399 !important;
+    font-weight: bold;
+    font-size: 20px;
+}
+
+#xg_away {
+    color: #f87171 !important;
+    font-weight: bold;
+    font-size: 20px;
+}
+
+#odds_home, #odds_draw, #odds_away {
+    color: #ffffff !important;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+#confidence {
+    color: #38bdf8 !important;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+#teams {
+    color: #e2e8f0 !important;
+    font-size: 16px;
+}
+
+#advice {
+    color: #60a5fa !important;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+#live_pred {
+    color: #f472b6 !important;
+    font-weight: bold;
+}
+
+#acc_pct {
+    color: #34d399 !important;
+}
+
+#fuzzy, #rf, #gb, #lstm {
+    color: #ffffff !important;
+    font-weight: bold;
+}
+</style>
+</head>
+<body>
+
+<nav class="navbar-custom d-flex justify-content-between align-items-center">
+    <h3 style="color:#60a5fa; margin:0;">⚽ AI Football Analytics</h3>
+    <span style="color:#94a3b8;">Fuzzy Logic + ML + Deep Learning</span>
+</nav>
+
+<div class="container-fluid px-4 mt-4">
+    <div class="row">
+
+        <div class="col-md-4">
+            <div class="card">
+                <h5>📸 Upload Match Screenshot</h5>
+                <input type="file" id="img" class="form-control mb-3" accept="image/*">
+                <button class="btn-predict" onclick="predict()">
+                    🔍 Analyze Match
+                </button>
+                <div id="loading">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Analyzing match...</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h5>📊 System Accuracy</h5>
+                <p>Total predictions: <span id="total">0</span></p>
+                <p>Correct: <span id="correct">0</span></p>
+                <p class="stat-value" id="acc_pct">0%</p>
+            </div>
+
+            <div class="card">
+                <h5>🔴 Live Prediction</h5>
+                <p id="live_pred">Waiting for data...</p>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <h5>🎯 Prediction Result</h5>
+                <p>Match: <span id="teams">Upload a screenshot</span></p>
+                <p>Result: <span id="prediction" class="stat-value">-</span></p>
+                <p>Confidence: <span id="confidence">-</span></p>
+            </div>
+
+            <div class="card">
+                <h5>⚽ Expected Goals (xG)</h5>
+                <p>Home xG: <span id="xg_home">-</span></p>
+                <p>Away xG: <span id="xg_away">-</span></p>
+            </div>
+
+            <div class="card">
+                <h5>🧠 AI Model Breakdown</h5>
+                <p>Fuzzy Logic: <span id="fuzzy">-</span></p>
+                <div class="model-bar">
+                    <div class="model-fill" id="fuzzy_bar" style="width:0%;background:#8b5cf6"></div>
+                </div>
+
+                <p>Random Forest: <span id="rf">-</span></p>
+                <div class="model-bar">
+                    <div class="model-fill" id="rf_bar" style="width:0%;background:#3b82f6"></div>
+                </div>
+
+                <p>Gradient Boost: <span id="gb">-</span></p>
+                <div class="model-bar">
+                    <div class="model-fill" id="gb_bar" style="width:0%;background:#22c55e"></div>
+                </div>
+
+                <p>LSTM Deep Learning: <span id="lstm">-</span></p>
+                <div class="model-bar">
+                    <div class="model-fill" id="lstm_bar" style="width:0%;background:#f59e0b"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <h5>💰 Betting Odds</h5>
+                <p>Home Win: <span id="odds_home">-</span></p>
+                <p>Draw: <span id="odds_draw">-</span></p>
+                <p>Away Win: <span id="odds_away">-</span></p>
+            </div>
+
+            <div class="card">
+                <h5>🔥 Value Bet Detection</h5>
+                <p>Home: <span id="value_home" class="value-bet">-</span></p>
+                <p>Away: <span id="value_away" class="value-bet">-</span></p>
+            </div>
+
+            <div class="card">
+                <h5>💡 Betting Advice</h5>
+                <p id="advice">
+                    Upload a match to get advice
+                </p>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+async function safeFetchJson(url, options = {}) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch (e) {
+        console.error("Non-JSON response from " + url + ":", text);
+        throw new Error("Server returned HTML instead of JSON. Check Render logs.");
+    }
+
+    if (!response.ok) {
+        throw new Error(data.error || "Request failed");
+    }
+
+    return data;
+}
+
+function setText(id, value, fallback = '-') {
+    document.getElementById(id).innerHTML = value ?? fallback;
+}
+
+function setBar(id, value) {
+    const percent = Math.max(0, Math.min(100, (Number(value) || 0) * 100));
+    document.getElementById(id).style.width = percent + '%';
+}
+
+async function predict() {
+    var fileInput = document.getElementById('img');
+    var file = fileInput.files[0];
+
+    if (!file) {
+        alert('Please upload a screenshot first!');
+        return;
+    }
+
+    document.getElementById('loading').style.display = 'block';
+
+    try {
+        var formData = new FormData();
+        formData.append('image', file);
+
+        const data = await safeFetchJson('/predict', {
+            method: 'POST',
+            body: formData
+        });
+
+        setText('teams', (data.home_team || 'Unknown Home') + ' vs ' + (data.away_team || 'Unknown Away'));
+        setText('prediction', data.prediction);
+        setText('confidence', (data.confidence ?? '-') + '%');
+
+        setText('xg_home', data.xG_home);
+        setText('xg_away', data.xG_away);
+
+        setText('fuzzy', data.fuzzy_score);
+        setText('rf', data.rf_score);
+        setText('gb', data.gb_score);
+        setText('lstm', data.lstm_score);
+
+        setBar('fuzzy_bar', data.fuzzy_score);
+        setBar('rf_bar', data.rf_score);
+        setBar('gb_bar', data.gb_score);
+        setBar('lstm_bar', data.lstm_score);
+
+        setText('odds_home', data.odds?.home);
+        setText('odds_draw', data.odds?.draw);
+        setText('odds_away', data.odds?.away);
+
+        setText('value_home', data.value_bet_home);
+        setText('value_away', data.value_bet_away);
+
+        setText('advice', data.betting_advice, 'No advice available');
+    } catch (error) {
+        console.error("Prediction error:", error);
+        alert('Error: ' + error.message);
+    } finally {
+        document.getElementById('loading').style.display = 'none';
+    }
+}
+
+async function loadLivePrediction() {
+    try {
+        const data = await safeFetchJson('/live');
+        setText('live_pred', (data.prediction || 'No prediction') + ' (' + (data.confidence ?? '-') + '%)');
+    } catch (error) {
+        console.error("Live fetch error:", error);
+    }
+}
+
+async function loadAccuracy() {
+    try {
+        const data = await safeFetchJson('/accuracy');
+        setText('total', data.total, 0);
+        setText('correct', data.correct, 0);
+        setText('acc_pct', (data.accuracy ?? 0) + '%');
+    } catch (error) {
+        console.error("Accuracy fetch error:", error);
+    }
+}
+
+loadAccuracy();
+loadLivePrediction();
+setInterval(loadLivePrediction, 10000);
+</script>
+
+</body>
+</html>

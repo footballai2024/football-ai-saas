@@ -1,0 +1,12 @@
+# Byte-compiled files
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+env/
+
+# Large model files - don't push to GitHub
+models/*.pkl
+models/*.h5
