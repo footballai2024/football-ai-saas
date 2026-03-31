@@ -12,7 +12,7 @@ from api import get_odds, get_live_stats
 from config import BET_MIN_ODDS, BET_MAX_ODDS
 
 # ==========================================
-# LOAD ALL 5 MODELS
+# LOAD ALL MODELS
 # ==========================================
 MODELS_LOADED = False
 rf = None
@@ -51,7 +51,6 @@ try:
         feature_names = joblib.load('models/feature_names.pkl')
         print(f"Features loaded: {len(feature_names)}")
     except Exception:
-        # Default feature names matching train.py
         feature_names = [
             'HS', 'AS', 'HST', 'AST',
             'shot_diff', 'target_diff',
@@ -81,44 +80,60 @@ except Exception as e:
 
 def build_features(data, odds):
     """
-    Build ALL features matching train.py exactly
-    Including odds features if available
+    Build safe feature vector for prediction
     """
 
-    f = data.get('features', [])
+    if data is None:
+        data = {}
+
+    if odds is None:
+        odds = {}
+
+    f = data.get('features')
+    if f is None:
+        f = []
+
+    if not isinstance(f, list):
+        try:
+            f = list(f)
+        except Exception:
+            f = []
+
     while len(f) < 6:
         f.append(0)
 
-    # Basic shot values
-    hs = float(f[0]) if f[0] else 12.0
-    as_ = float(f[1]) if f[1] else 10.0
-    hst = float(f[2]) if f[2] else 5.0
-    ast = float(f[3]) if f[3] else 3.5
+    # Safe numeric conversion
+    def safe_float(value, default):
+        try:
+            if value is None or value == '':
+                return default
+            return float(value)
+        except Exception:
+            return default
 
-    # Basic features
+    hs = safe_float(f[0], 12.0)
+    as_ = safe_float(f[1], 10.0)
+    hst = safe_float(f[2], 5.0)
+    ast = safe_float(f[3], 3.5)
+
     shot_diff = hs - as_
     target_diff = hst - ast
 
     home_accuracy = hst / max(hs, 1)
     away_accuracy = ast / max(as_, 1)
-
     home_dominance = hs / max(hs + as_, 1)
 
-    # Rolling forms (use current values as estimate)
     home_shot_form = hs
     away_shot_form = as_
     home_shot_form_long = hs
     away_shot_form_long = as_
 
-    # Target forms
     home_target_form = hst
     away_target_form = ast
 
     home_target_ratio = hst / max(hst + ast, 1)
-
     home_pressure = hst * home_accuracy
     away_pressure = ast * away_accuracy
-
     shot_efficiency = (hst - ast) / max(hs + as_, 1)
 
     home_attack_power = hs * 0.4 + hst * 0.6
@@ -133,7 +148,6 @@ def build_features(data, odds):
     home_momentum = 0.0
     away_momentum = 0.0
 
-    # Build base feature dictionary
     all_values = {
         'HS': hs,
         'AS': as_,
@@ -164,10 +178,9 @@ def build_features(data, odds):
         'away_momentum': away_momentum,
     }
 
-    # Add odds features if available (matching train.py)
-    home_odds = odds.get('home', 2.0)
-    draw_odds = odds.get('draw', 3.2)
-    away_odds = odds.get('away', 2.8)
+    home_odds = safe_float(odds.get('home', 2.0), 2.0)
+    draw_odds = safe_float(odds.get('draw', 3.2), 3.2)
+    away_odds = safe_float(odds.get('away', 2.8), 2.8)
 
     if home_odds > 0 and draw_odds > 0 and away_odds > 0:
         home_prob = 1 / home_odds
@@ -175,10 +188,11 @@ def build_features(data, odds):
         away_prob = 1 / away_odds
 
         total_prob = home_prob + draw_prob + away_prob
+        if total_prob == 0:
+            total_prob = 1
 
         home_prob_norm = home_prob / total_prob
         away_prob_norm = away_prob / total_prob
-
         odds_diff = away_odds - home_odds
         home_favourite = 1 if home_odds < away_odds else 0
 
@@ -190,7 +204,6 @@ def build_features(data, odds):
         all_values['odds_diff'] = odds_diff
         all_values['home_favourite'] = home_favourite
 
-    # Return values in EXACT feature_names order
     result = []
     for name in feature_names:
         result.append(float(all_values.get(name, 0.0)))
@@ -199,9 +212,8 @@ def build_features(data, odds):
 
 
 def full_pipeline(file=None, live=False):
-    """Main prediction function using all 5 models"""
+    """Main prediction function"""
 
-    # Get data
     if live:
         data = get_live_stats()
     elif file:
@@ -209,31 +221,56 @@ def full_pipeline(file=None, live=False):
     else:
         return {"error": "No input"}
 
-    # Get odds first (needed for features)
-    odds = get_odds(data.get('home_team', ''))
+    if data is None:
+        return {"error": "Could not extract data from screenshot"}
 
-    # Build features
+    if not isinstance(data, dict):
+        return {"error": "Invalid extracted data format"}
+
+    odds = get_odds(data.get('home_team', ''))
+    if odds is None:
+        odds = {"home": 2.0, "draw": 3.2, "away": 2.8}
+
     all_features = build_features(data, odds)
 
-    # xG calculation
+    goals_home = data.get('goals_home', 1)
+    goals_away = data.get('goals_away', 1)
+    form_home = data.get('form_home', 60)
+    form_away = data.get('form_away', 60)
+
+    try:
+        goals_home = float(goals_home) if goals_home is not None else 1
+    except Exception:
+        goals_home = 1
+
+    try:
+        goals_away = float(goals_away) if goals_away is not None else 1
+    except Exception:
+        goals_away = 1
+
+    try:
+        form_home = float(form_home) if form_home is not None else 60
+    except Exception:
+        form_home = 60
+
+    try:
+        form_away = float(form_away) if form_away is not None else 60
+    except Exception:
+        form_away = 60
+
     xg_home = calculate_xg(
-        data.get('goals_home', 1),
+        goals_home,
         all_features[0] if len(all_features) > 0 else 10,
         all_features[2] if len(all_features) > 2 else 5
     )
     xg_away = calculate_xg(
-        data.get('goals_away', 1),
+        goals_away,
         all_features[1] if len(all_features) > 1 else 8,
         all_features[3] if len(all_features) > 3 else 3
     )
 
-    # Fuzzy score
-    fuzzy = fuzzy_score(
-        data.get('form_home', 60),
-        data.get('form_away', 60)
-    )
+    fuzzy = fuzzy_score(form_home, form_away)
 
-    # Model predictions
     rf_pred = 0.5
     gb_pred = 0.5
     xgb_pred = 0.5
@@ -241,71 +278,39 @@ def full_pipeline(file=None, live=False):
     vote_pred = 0.5
 
     if MODELS_LOADED:
-        # Create feature DataFrame
-        feature_df = pd.DataFrame(
-            [all_features],
-            columns=feature_names
-        )
-
-        # Fill any NaN values
+        feature_df = pd.DataFrame([all_features], columns=feature_names)
         feature_df = feature_df.fillna(0)
 
-        # Random Forest
         try:
-            rf_pred = float(
-                rf.predict_proba(feature_df)[0][1]
-            )
+            rf_pred = float(rf.predict_proba(feature_df)[0][1])
         except Exception:
             rf_pred = 0.5
 
-        # Gradient Boosting
         try:
-            gb_pred = float(
-                gb.predict_proba(feature_df)[0][1]
-            )
+            gb_pred = float(gb.predict_proba(feature_df)[0][1])
         except Exception:
             gb_pred = 0.5
 
-        # XGBoost
         if xgb_model is not None:
             try:
-                xgb_pred = float(
-                    xgb_model.predict_proba(
-                        feature_df
-                    )[0][1]
-                )
+                xgb_pred = float(xgb_model.predict_proba(feature_df)[0][1])
             except Exception:
                 xgb_pred = (rf_pred + gb_pred) / 2
 
-        # Neural Network
         if nn_model is not None and scaler is not None:
             try:
                 scaled = scaler.transform(feature_df)
-                nn_pred = float(
-                    nn_model.predict_proba(scaled)[0][1]
-                )
+                nn_pred = float(nn_model.predict_proba(scaled)[0][1])
             except Exception:
                 nn_pred = (rf_pred + gb_pred) / 2
 
-        # Voting Ensemble
         if voting_model is not None:
             try:
-                vote_pred = float(
-                    voting_model.predict_proba(
-                        feature_df
-                    )[0][1]
-                )
+                vote_pred = float(voting_model.predict_proba(feature_df)[0][1])
             except Exception:
-                vote_pred = (
-                    rf_pred + gb_pred + xgb_pred
-                ) / 3
+                vote_pred = (rf_pred + gb_pred + xgb_pred) / 3
 
-    # Combine all models
-    # Weights based on accuracy:
-    # NN=75.10%, GB=75.05%, XGB=74.81%, Vote=74.95%, RF=74.18%
-    if (nn_model is not None and
-            xgb_model is not None and
-            voting_model is not None):
+    if nn_model is not None and xgb_model is not None and voting_model is not None:
         final = (
             0.05 * fuzzy +
             0.10 * rf_pred +
@@ -328,7 +333,6 @@ def full_pipeline(file=None, live=False):
             0.45 * gb_pred
         )
 
-    # Decision
     if final > 0.6:
         prediction = "Home Win"
     elif final < 0.4:
@@ -338,15 +342,8 @@ def full_pipeline(file=None, live=False):
 
     confidence = round(final * 100, 2)
 
-    # Value bets
-    value_home = check_value_bet(
-        final, odds.get('home', 2.0)
-    )
-    value_away = check_value_bet(
-        1 - final, odds.get('away', 2.0)
-    )
-
-    # Betting advice
+    value_home = check_value_bet(final, odds.get('home', 2.0))
+    value_away = check_value_bet(1 - final, odds.get('away', 2.0))
     advice = get_betting_advice(final, odds)
 
     return {
@@ -369,8 +366,14 @@ def full_pipeline(file=None, live=False):
 
 def check_value_bet(prob, odds):
     """Check if bet has value"""
+    try:
+        odds = float(odds)
+    except Exception:
+        return "No data"
+
     if odds <= 0:
         return "No data"
+
     bk = 1 / odds
     if prob > bk and prob > 0.55:
         edge = round((prob - bk) * 100, 1)
@@ -380,13 +383,22 @@ def check_value_bet(prob, odds):
 
 def get_betting_advice(prob, odds):
     """Give betting recommendation"""
-    ho = odds.get('home', 0)
-    ao = odds.get('away', 0)
+    if odds is None:
+        odds = {}
+
+    try:
+        ho = float(odds.get('home', 0))
+    except Exception:
+        ho = 0
+
+    try:
+        ao = float(odds.get('away', 0))
+    except Exception:
+        ao = 0
 
     if prob > 0.65 and BET_MIN_ODDS <= ho <= BET_MAX_ODDS:
         return "BET HOME (Strong signal)"
-    elif (prob < 0.35 and
-            BET_MIN_ODDS <= ao <= BET_MAX_ODDS):
+    elif prob < 0.35 and BET_MIN_ODDS <= ao <= BET_MAX_ODDS:
         return "BET AWAY (Strong signal)"
     elif 0.45 <= prob <= 0.55:
         return "CONSIDER DRAW"
