@@ -1,6 +1,3 @@
-# api.py
-# Connects to real football data from the internet
-
 import requests
 from config import FOOTBALL_API_KEY, ODDS_API_KEY, LEAGUES
 
@@ -8,6 +5,7 @@ HEADERS = {
     "X-RapidAPI-Key": FOOTBALL_API_KEY,
     "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
 }
+
 
 def get_upcoming_matches():
     """Get next matches from all leagues"""
@@ -23,13 +21,26 @@ def get_upcoming_matches():
             }
 
             res = requests.get(
-                url, headers=HEADERS,
-                params=params, timeout=10
+                url,
+                headers=HEADERS,
+                params=params,
+                timeout=10
             )
-            data = res.json()
 
-            if 'response' in data:
-                for match in data['response']:
+            if res.status_code != 200:
+                print(f"API error for {league_name}: status {res.status_code}")
+                continue
+
+            data = res.json()
+            if not isinstance(data, dict):
+                continue
+
+            response_data = data.get('response', [])
+            if not isinstance(response_data, list):
+                response_data = []
+
+            for match in response_data:
+                if isinstance(match, dict):
                     match['league_name'] = league_name
                     all_matches.append(match)
 
@@ -38,8 +49,11 @@ def get_upcoming_matches():
 
     return all_matches
 
+
 def get_odds(match_name=""):
     """Get betting odds for a match"""
+    default_odds = {"home": 2.0, "draw": 3.2, "away": 2.8}
+
     try:
         url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
         params = {
@@ -49,24 +63,108 @@ def get_odds(match_name=""):
         }
 
         res = requests.get(url, params=params, timeout=10)
+
+        if res.status_code != 200:
+            print(f"Odds API error: status {res.status_code}")
+            return default_odds
+
         data = res.json()
+        if not isinstance(data, list):
+            return default_odds
 
-        # Try to find matching game
+        match_name = (match_name or "").lower().strip()
+
         for event in data:
-            home = event.get('home_team', '').lower()
-            if match_name.lower() in home:
-                outcomes = event['bookmakers'][0]['markets'][0]['outcomes']
-                return {
-                    "home": outcomes[0]['price'],
-                    "draw": outcomes[1]['price'] if len(outcomes) > 1 else 3.0,
-                    "away": outcomes[2]['price'] if len(outcomes) > 2 else 3.0
-                }
+            if not isinstance(event, dict):
+                continue
 
-        # Default odds if not found
-        return {"home": 2.0, "draw": 3.2, "away": 2.8}
+            home = str(event.get('home_team', '')).lower()
+            away = str(event.get('away_team', '')).lower()
 
-    except Exception:
-        return {"home": 2.0, "draw": 3.2, "away": 2.8}
+            # If match name is empty, just skip matching and return first valid odds found
+            is_match = (
+                not match_name or
+                match_name in home or
+                match_name in away
+            )
+
+            if not is_match:
+                continue
+
+            bookmakers = event.get('bookmakers', [])
+            if not bookmakers or not isinstance(bookmakers, list):
+                continue
+
+            bookmaker = bookmakers[0] if bookmakers else {}
+            markets = bookmaker.get('markets', [])
+            if not markets or not isinstance(markets, list):
+                continue
+
+            market = markets[0] if markets else {}
+            outcomes = market.get('outcomes', [])
+            if not outcomes or not isinstance(outcomes, list):
+                continue
+
+            home_price = None
+            draw_price = None
+            away_price = None
+
+            for outcome in outcomes:
+                if not isinstance(outcome, dict):
+                    continue
+
+                name = str(outcome.get('name', '')).lower()
+                price = outcome.get('price')
+
+                try:
+                    price = float(price)
+                except Exception:
+                    continue
+
+                if 'draw' in name:
+                    draw_price = price
+                elif home and name == home:
+                    home_price = price
+                elif away and name == away:
+                    away_price = price
+
+            # Fallback by position if names didn't match
+            if home_price is None and len(outcomes) > 0:
+                try:
+                    home_price = float(outcomes[0].get('price', default_odds['home']))
+                except Exception:
+                    home_price = default_odds['home']
+
+            if draw_price is None:
+                if len(outcomes) > 1:
+                    try:
+                        draw_price = float(outcomes[1].get('price', default_odds['draw']))
+                    except Exception:
+                        draw_price = default_odds['draw']
+                else:
+                    draw_price = default_odds['draw']
+
+            if away_price is None:
+                if len(outcomes) > 2:
+                    try:
+                        away_price = float(outcomes[2].get('price', default_odds['away']))
+                    except Exception:
+                        away_price = default_odds['away']
+                else:
+                    away_price = default_odds['away']
+
+            return {
+                "home": home_price if home_price and home_price > 0 else default_odds["home"],
+                "draw": draw_price if draw_price and draw_price > 0 else default_odds["draw"],
+                "away": away_price if away_price and away_price > 0 else default_odds["away"]
+            }
+
+        return default_odds
+
+    except Exception as e:
+        print(f"Odds fetch error: {e}")
+        return default_odds
+
 
 def get_live_stats():
     """Get data for live prediction (no screenshot needed)"""
